@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#493323">
+<title>Tenho preguiça de ler então fiz esse sistema</title>
+<style>
+:root{--wood:#493323;--wood2:#65472e;--paper:#ead9b8;--sheet:#fbf4e6;--gold:#b58a4d;--muted:#826b4d;--line:#d8c29b}
+*{box-sizing:border-box}
+html{min-height:100%;background:#291d14}
+body{margin:0;min-height:100vh;color:var(--wood);font-family:Georgia,'Times New Roman',serif;background:radial-gradient(ellipse at top,#806044 0,#3a291c 55%,#21170f 100%);padding:18px}
+button,select,input{font:inherit}
+.shell{max-width:1180px;margin:auto;background:var(--paper);border:8px ridge #76502f;box-shadow:0 18px 60px #0008;min-height:calc(100vh - 36px);position:relative;overflow:hidden}
+.shell:before{content:"";position:absolute;inset:0;pointer-events:none;opacity:.15;background:radial-gradient(ellipse at 20% 15%,#fff 0,transparent 30%),repeating-linear-gradient(8deg,transparent 0 36px,#a8875b 37px,transparent 38px)}
+header{position:relative;text-align:center;padding:22px 18px 17px;border-bottom:2px solid var(--gold);margin:0 22px}
+.mark{font-size:24px;color:#9b713f;line-height:1}.eyebrow{font-size:10px;letter-spacing:3px;color:var(--muted);margin-top:7px}
+h1{font-size:clamp(22px,3vw,39px);line-height:1.12;margin:9px auto 6px;max-width:850px;text-shadow:1px 2px #fff7}
+.motto{font-style:italic;color:#806747;font-size:14px;margin:0}
+main{position:relative;padding:18px;display:grid;grid-template-columns:290px minmax(0,1fr);gap:17px}
+.panel{background:linear-gradient(145deg,#e6d2ad,#d4b88c);border:1px solid #b99b6b;border-radius:9px;padding:16px;box-shadow:inset 0 1px #fff8}
+.panel h2{font-size:19px;margin:0 0 13px}.section-title{font-size:15px;margin:17px 0 8px}
+.upload{display:flex;align-items:center;justify-content:center;gap:9px;text-align:center;padding:15px 10px;background:#f8eedb;border:2px dashed #9a7548;border-radius:7px;cursor:pointer;transition:.2s}
+.upload:hover{background:#fff8e9;transform:translateY(-1px)}.upload .plus{font-size:25px}.upload input{display:none}
+.small{font-size:12px;line-height:1.45;color:var(--muted)}#filename{overflow-wrap:anywhere;margin:9px 0 0}
+select{width:100%;min-height:42px;padding:9px 10px;border:1px solid #ad8e60;border-radius:6px;background:#fbf3e4;color:var(--wood);font-size:14px}
+input[type=range]{width:100%;accent-color:#76502f}
+.speedrow{display:flex;justify-content:space-between;align-items:center}.speedrow strong{font-size:13px}
+.controls{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.btn{min-height:42px;padding:9px 12px;border-radius:6px;border:1px solid #624326;background:#563a25;color:#fff0d2;cursor:pointer;transition:transform .16s,box-shadow .16s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 4px 9px #49332330}.btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none}
+.btn.secondary{background:#f5e8cf;color:var(--wood)}.btn.wide{grid-column:1/-1}
+.status{min-height:34px;margin-top:10px;font-size:12px;color:#765b3b;line-height:1.4}
+.reader{background:var(--sheet);border:1px solid #b99b6b;border-radius:9px;min-height:620px;display:flex;flex-direction:column;overflow:hidden;box-shadow:inset 0 0 35px #b38a5220}
+.readerbar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--line);background:#f1e4cc}
+#docTitle{font-size:13px;font-weight:bold;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:55%}
+.pager{display:flex;align-items:center;gap:7px;white-space:nowrap;font-size:12px}
+.pager .btn{min-height:34px;padding:4px 11px;font-size:18px}
+.pagearea{flex:1;min-height:400px;display:flex;justify-content:center;align-items:flex-start;overflow:auto;padding:16px;background:linear-gradient(#fbf4e6,#f6ecd9)}
+.page{display:block;max-width:100%;height:auto;box-shadow:0 4px 18px #49332326;animation:appear .3s ease}
+.empty{text-align:center;margin:auto;padding:55px 14px;color:#8b704e}.book{font-size:54px}.empty h2{font-size:21px}
+.audiofoot{padding:12px 14px;border-top:1px solid var(--line);background:#f1e4cc}
+.reading{font-size:12px;line-height:1.45;color:#765b3b;max-height:42px;overflow:hidden}
+.progress{height:5px;background:#d9c6a3;border-radius:8px;overflow:hidden;margin-top:9px}.bar{height:100%;width:0;background:linear-gradient(90deg,#8a6338,#d1a65f);transition:width .2s}
+footer{text-align:center;color:#806747;font-size:11px;padding:0 12px 16px;position:relative}
+.mobile-actions{display:none}
+@keyframes appear{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+@keyframes shimmer{0%,100%{filter:brightness(1)}50%{filter:brightness(1.035)}}
+.shell{animation:shimmer 10s ease-in-out infinite}
+@media(max-width:760px){
+ body{padding:0;background:var(--paper)}
+ .shell{min-height:100vh;border:0;box-shadow:none}
+ header{margin:0 14px;padding:17px 4px 13px}
+ .mark{font-size:21px}.eyebrow{font-size:9px;letter-spacing:2px}
+ h1{font-size:25px;max-width:440px}.motto{font-size:13px}
+ main{display:flex;flex-direction:column;padding:12px;gap:12px}
+ .reader{order:1;min-height:0}
+ .readerbar{padding:9px 10px}#docTitle{max-width:48%;font-size:12px}
+ .pagearea{min-height:44vh;max-height:58vh;padding:10px 5px}
+ .page{width:auto;max-height:none}
+ .audiofoot{padding:10px 12px}
+ .panel{order:2;padding:14px}
+ .panel h2{font-size:18px;margin-bottom:10px}
+ .upload{padding:13px}
+ .section-title{margin:13px 0 7px}
+ .controls{grid-template-columns:repeat(3,1fr)}
+ .btn{font-size:13px;padding:9px 7px;min-height:44px}
+ .btn.wide{grid-column:auto}
+ .status{min-height:20px}
+ footer{padding:4px 12px 22px}
+}
+@media(max-width:380px){
+ h1{font-size:22px}.eyebrow{letter-spacing:1px}
+ .controls{grid-template-columns:1fr 1fr}.controls .wide{grid-column:1/-1}
+ .pager{gap:3px}.pager .btn{padding:3px 8px}
+}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header>
+ <div class="mark">❦</div><div class="eyebrow">BIBLIOTECA PARTICULAR · EDIÇÃO PESSOAL</div>
+ <h1>Tenho preguiça de ler então fiz esse sistema</h1>
+ <p class="motto">“Por que ler, se podemos ouvir?”</p>
+</header>
+<main>
+ <section class="reader">
+  <div class="readerbar"><span id="docTitle">Sala de leitura</span><div class="pager"><button class="btn secondary" id="prev" disabled aria-label="Página anterior">‹</button><span id="pageLabel">1 / —</span><button class="btn secondary" id="next" disabled aria-label="Próxima página">›</button></div></div>
+  <div class="pagearea" id="pagearea"><div class="empty"><div class="book">📖</div><h2>O pergaminho está em branco</h2><p>Escolha um PDF para começar sua leitura.</p></div></div>
+  <div class="audiofoot"><div class="reading" id="reading">O trecho narrado aparecerá aqui.</div><div class="progress"><div class="bar" id="bar"></div></div></div>
+ </section>
+ <aside class="panel">
+  <h2>📜 Seu pergaminho</h2>
+  <label class="upload"><span class="plus">＋</span><span><b>Abrir arquivo PDF</b><br><span class="small">Escolha um documento do dispositivo</span></span><input id="file" type="file" accept="application/pdf"></label>
+  <p class="small" id="filename">Nenhum documento aberto.</p>
+  <div class="section-title">🎙️ Voz da narração</div><select id="voice"><option value="">Carregando vozes pt-BR…</option></select>
+  <p class="small">Somente vozes identificadas como Português (Brasil), fornecidas pelo aparelho.</p>
+  <div class="section-title speedrow"><span>Velocidade</span><strong id="speedLabel">1,0×</strong></div>
+  <input id="speed" type="range" min=".6" max="2" value="1" step=".1">
+  <div class="section-title">Controles</div>
+  <div class="controls"><button class="btn" id="play" disabled>▶ Ouvir</button><button class="btn secondary" id="pause" disabled>Ⅱ Pausar</button><button class="btn secondary wide" id="stop" disabled>■ Parar</button></div>
+  <div class="status" id="status">Abra um PDF para começar.</div>
+ </aside>
+</main>
+<footer>Feito para ouvir · Sem assinaturas · Sem APIs pagas</footer>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+let pdf=null,page=1,texts=[],parts=[],part=0,active=false,paused=false;
+if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+function refreshVoices(){
+ const s=$('voice'),old=s.value;s.innerHTML='';
+ const vs=speechSynthesis.getVoices().filter(v=>v.lang.toLowerCase()==='pt-br');
+ if(!vs.length){s.innerHTML='<option value="">Voz pt-BR não encontrada no aparelho</option>';return}
+ vs.forEach(v=>{const o=document.createElement('option');o.value=v.name;o.textContent=v.name+' · Português (Brasil)';s.append(o)});
+ if([...s.options].some(o=>o.value===old))s.value=old;
+}
+refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices;
+$('file').onchange=async e=>{
+ const f=e.target.files[0];if(!f)return;
+ if(!window.pdfjsLib){$('status').textContent='Não foi possível carregar o leitor de PDF. Verifique a conexão.';return}
+ stopRead();$('status').textContent='Abrindo PDF…';
+ try{
+  pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;texts=[];
+  for(let n=1;n<=pdf.numPages;n++){const p=await pdf.getPage(n),c=await p.getTextContent();texts.push(c.items.map(x=>x.str).join(' '))}
+  page=1;$('filename').textContent=f.name;$('docTitle').textContent=f.name;
+  $('play').disabled=$('pause').disabled=$('stop').disabled=false;
+  $('prev').disabled=$('next').disabled=false;await renderPage();$('status').textContent='PDF carregado. Pronto para ouvir.';
+ }catch(err){console.error(err);$('status').textContent='Não foi possível abrir este PDF.'}
+};
+async function renderPage(){
+ const p=await pdf.getPage(page),scale=Math.min(1.5,($('pagearea').clientWidth-18)/p.getViewport({scale:1}).width);
+ const v=p.getViewport({scale:Math.max(.5,scale)}),c=document.createElement('canvas');c.width=v.width;c.height=v.height;
+ await p.render({canvasContext:c.getContext('2d'),viewport:v}).promise;c.className='page';
+ $('pagearea').replaceChildren(c);$('pageLabel').textContent=page+' / '+pdf.numPages;
+ $('prev').disabled=page===1;$('next').disabled=page===pdf.numPages;
+}
+$('prev').onclick=async()=>{page=Math.max(1,page-1);await renderPage()};
+$('next').onclick=async()=>{page=Math.min(pdf.numPages,page+1);await renderPage()};
+$('speed').oninput=()=>$('speedLabel').textContent=Number($('speed').value).toFixed(1).replace('.',',')+'×';
+function makeParts(){const a=[];for(let n=page-1;n<texts.length;n++){(texts[n].replace(/\s+/g,' ').match(/[^.!?;:]+[.!?;:]*/g)||[]).forEach(t=>{if(t.trim())a.push({t:t.trim(),p:n+1})})}return a}
+function speakNext(){
+ if(!active||paused)return;
+ if(part>=parts.length){active=false;$('status').textContent='Leitura concluída!';$('bar').style.width='100%';return}
+ const item=parts[part];
+ const continueSpeaking=async()=>{
+  if(!active||paused)return;
+  if(page!==item.p){page=item.p;await renderPage()}
+  $('reading').textContent='Página '+item.p+' · '+item.t;
+  $('bar').style.width=(part/Math.max(1,parts.length)*100)+'%';
+  const u=new SpeechSynthesisUtterance(item.t),voices=speechSynthesis.getVoices();
+  const chosen=voices.find(v=>v.name===$('voice').value&&v.lang.toLowerCase()==='pt-br')||voices.find(v=>v.lang.toLowerCase()==='pt-br');
+  u.lang='pt-BR';if(chosen)u.voice=chosen;u.rate=Number($('speed').value);
+  u.onend=()=>{part++;speakNext()};
+  u.onerror=e=>{if(e.error!=='canceled'){$('status').textContent='Erro ao reproduzir a voz.';active=false}};
+  speechSynthesis.speak(u);
+ };
+ continueSpeaking();
+}
+$('play').onclick=()=>{
+ if(!pdf)return;
+ if(paused){paused=false;speechSynthesis.resume();return}
+ if(active)return;
+ parts=makeParts();part=0;active=true;speakNext();
+};
+$('pause').onclick=()=>{if(speechSynthesis.speaking){paused=true;speechSynthesis.pause();$('status').textContent='Leitura pausada.'}};
+function stopRead(){speechSynthesis.cancel();active=false;paused=false;$('bar').style.width='0%'}
+$('stop').onclick=()=>{stopRead();$('status').textContent='Narração parada.'};
+</script>
+</body></html>

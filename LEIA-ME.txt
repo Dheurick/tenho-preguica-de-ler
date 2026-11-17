@@ -1,0 +1,10 @@
+PUBLICAÇÃO NO GITHUB PAGES
+
+1. Crie um repositório no GitHub, por exemplo: tenho-preguica-de-ler
+2. Envie o arquivo index.html para a raiz do repositório.
+3. Em Settings > Pages, escolha Deploy from a branch.
+4. Selecione a branch main e a pasta /(root), depois salve.
+5. Aguarde a publicação e abra o endereço fornecido pelo GitHub Pages.
+
+O leitor carrega PDF.js de uma CDN, então a primeira abertura precisa de internet.
+As vozes dependem das vozes pt-BR disponíveis no navegador/dispositivo.
