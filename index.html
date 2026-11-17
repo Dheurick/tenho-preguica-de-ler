@@ -41,7 +41,10 @@ input[type=range]{width:100%;accent-color:#76502f}
 .empty{text-align:center;margin:auto;padding:55px 14px;color:#8b704e}.book{font-size:54px}.empty h2{font-size:21px}
 .audiofoot{padding:12px 14px;border-top:1px solid var(--line);background:#f1e4cc}
 .reading{font-size:12px;line-height:1.45;color:#765b3b;max-height:42px;overflow:hidden}
-.progress{height:5px;background:#d9c6a3;border-radius:8px;overflow:hidden;margin-top:9px}.bar{height:100%;width:0;background:linear-gradient(90deg,#8a6338,#d1a65f);transition:width .2s}
+.progress{height:8px;background:#d9c6a3;border-radius:8px;overflow:hidden;margin-top:9px;cursor:pointer;touch-action:pan-y;position:relative}
+.bar{height:100%;width:0;background:linear-gradient(90deg,#8a6338,#d1a65f);transition:width .15s linear;pointer-events:none}
+.progress:focus-visible{outline:2px solid #76502f;outline-offset:3px}
+.time-row{display:flex;justify-content:space-between;gap:8px;margin-top:5px;font:11px Arial,sans-serif;color:#826b4d;font-variant-numeric:tabular-nums}
 footer{text-align:center;color:#806747;font-size:11px;padding:0 12px 16px;position:relative}
 .mobile-actions{display:none}
 @keyframes appear{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
@@ -58,7 +61,7 @@ footer{text-align:center;color:#806747;font-size:11px;padding:0 12px 16px;positi
  .readerbar{padding:9px 10px}#docTitle{max-width:48%;font-size:12px}
  .pagearea{min-height:44vh;max-height:58vh;padding:10px 5px}
  .page{width:auto;max-height:none}
- .audiofoot{padding:10px 12px}
+ .audiofoot{padding:10px 12px}.progress{height:12px}.time-row{font-size:11px}
  .panel{order:2;padding:14px}
  .panel h2{font-size:18px;margin-bottom:10px}
  .upload{padding:13px}
@@ -88,7 +91,8 @@ footer{text-align:center;color:#806747;font-size:11px;padding:0 12px 16px;positi
  <section class="reader">
   <div class="readerbar"><span id="docTitle">Sala de leitura</span><div class="pager"><button class="btn secondary" id="prev" disabled aria-label="Página anterior">‹</button><span id="pageLabel">1 / —</span><button class="btn secondary" id="next" disabled aria-label="Próxima página">›</button></div></div>
   <div class="pagearea" id="pagearea"><div class="empty"><div class="book">📖</div><h2>O pergaminho está em branco</h2><p>Escolha um PDF para começar sua leitura.</p></div></div>
-  <div class="audiofoot"><div class="reading" id="reading">O trecho narrado aparecerá aqui.</div><div class="progress"><div class="bar" id="bar"></div></div></div>
+  <div class="audiofoot"><div class="reading" id="reading">O trecho narrado aparecerá aqui.</div><div class="progress" id="progressTrack" role="slider" tabindex="0" aria-label="Posição da leitura" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar" id="bar"></div></div>
+  <div class="time-row"><span id="elapsed">00:00</span><span id="remaining">-00:00</span><span id="totalTime">00:00</span></div></div>
  </section>
  <aside class="panel">
   <h2>📜 Seu pergaminho</h2>
@@ -109,6 +113,7 @@ footer{text-align:center;color:#806747;font-size:11px;padding:0 12px 16px;positi
 <script>
 const $=id=>document.getElementById(id);
 let pdf=null,page=1,texts=[],parts=[],part=0,active=false,paused=false;
+let durations=[],totalSeconds=0,elapsedBefore=0,sentenceStartedAt=0,progressTimer=null;
 if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 function refreshVoices(){
  const s=$('voice'),old=s.value;s.innerHTML='';
@@ -118,6 +123,25 @@ function refreshVoices(){
  if([...s.options].some(o=>o.value===old))s.value=old;
 }
 refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices;
+function fmt(sec){sec=Math.max(0,Math.floor(sec||0));return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
+function estimateSeconds(text){
+ // Estimativa inicial; a posição real avança ao terminar cada frase.
+ const words=(text.match(/\S+/g)||[]).length;
+ return Math.max(1,words/(2.65*Number($('speed').value||1)));
+}
+function rebuildTimeline(){
+ durations=parts.map(x=>estimateSeconds(x.t));totalSeconds=durations.reduce((a,b)=>a+b,0);
+ updateTimeline();
+}
+function secondsAt(index){let s=0;for(let i=0;i<Math.min(index,durations.length);i++)s+=durations[i];return s}
+function updateTimeline(){
+ const current=Math.min(totalSeconds,elapsedBefore+(active&&!paused?Math.min(durations[part]||0,(performance.now()-sentenceStartedAt)/1000):0));
+ const pct=totalSeconds?current/totalSeconds*100:0;
+ $('bar').style.width=pct+'%';$('elapsed').textContent=fmt(current);
+ $('remaining').textContent='-'+fmt(Math.max(0,totalSeconds-current));$('totalTime').textContent=fmt(totalSeconds);
+ $('progressTrack').setAttribute('aria-valuenow',String(Math.round(pct)));
+}
+function startProgressTimer(){clearInterval(progressTimer);progressTimer=setInterval(updateTimeline,250)}
 $('file').onchange=async e=>{
  const f=e.target.files[0];if(!f)return;
  if(!window.pdfjsLib){$('status').textContent='Não foi possível carregar o leitor de PDF. Verifique a conexão.';return}
@@ -139,34 +163,47 @@ async function renderPage(){
 }
 $('prev').onclick=async()=>{page=Math.max(1,page-1);await renderPage()};
 $('next').onclick=async()=>{page=Math.min(pdf.numPages,page+1);await renderPage()};
-$('speed').oninput=()=>$('speedLabel').textContent=Number($('speed').value).toFixed(1).replace('.',',')+'×';
+$('speed').oninput=()=>{$('speedLabel').textContent=Number($('speed').value).toFixed(1).replace('.',',')+'×';if(parts.length){rebuildTimeline();elapsedBefore=secondsAt(part);updateTimeline()}};
 function makeParts(){const a=[];for(let n=page-1;n<texts.length;n++){(texts[n].replace(/\s+/g,' ').match(/[^.!?;:]+[.!?;:]*/g)||[]).forEach(t=>{if(t.trim())a.push({t:t.trim(),p:n+1})})}return a}
 function speakNext(){
  if(!active||paused)return;
- if(part>=parts.length){active=false;$('status').textContent='Leitura concluída!';$('bar').style.width='100%';return}
+ if(part>=parts.length){active=false;elapsedBefore=totalSeconds;clearInterval(progressTimer);$('status').textContent='Leitura concluída!';updateTimeline();return}
  const item=parts[part];
  const continueSpeaking=async()=>{
   if(!active||paused)return;
   if(page!==item.p){page=item.p;await renderPage()}
   $('reading').textContent='Página '+item.p+' · '+item.t;
-  $('bar').style.width=(part/Math.max(1,parts.length)*100)+'%';
+  elapsedBefore=secondsAt(part);sentenceStartedAt=performance.now();updateTimeline();startProgressTimer();
   const u=new SpeechSynthesisUtterance(item.t),voices=speechSynthesis.getVoices();
   const chosen=voices.find(v=>v.name===$('voice').value&&v.lang.toLowerCase()==='pt-br')||voices.find(v=>v.lang.toLowerCase()==='pt-br');
   u.lang='pt-BR';if(chosen)u.voice=chosen;u.rate=Number($('speed').value);
-  u.onend=()=>{part++;speakNext()};
-  u.onerror=e=>{if(e.error!=='canceled'){$('status').textContent='Erro ao reproduzir a voz.';active=false}};
+  u.onend=()=>{part++;elapsedBefore=secondsAt(part);updateTimeline();speakNext()};
+  u.onerror=e=>{if(e.error!=='canceled'){$('status').textContent='Erro ao reproduzir a voz.';active=false;clearInterval(progressTimer)}};
   speechSynthesis.speak(u);
  };
  continueSpeaking();
 }
+function startFrom(index){
+ speechSynthesis.cancel();part=Math.max(0,Math.min(parts.length-1,index));elapsedBefore=secondsAt(part);active=true;paused=false;
+ $('status').textContent='Reproduzindo leitura…';speakNext();
+}
+function seekToFraction(fraction){
+ if(!parts.length)return;
+ const target=Math.max(0,Math.min(.999999,fraction))*totalSeconds;
+ let sum=0,index=0;while(index<durations.length-1&&sum+durations[index]<target){sum+=durations[index];index++}
+ startFrom(index);
+}
+function pointerSeek(e){const r=$('progressTrack').getBoundingClientRect();seekToFraction((e.clientX-r.left)/r.width)}
+$('progressTrack').addEventListener('click',pointerSeek);
+$('progressTrack').addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const now=totalSeconds?elapsedBefore/totalSeconds:0;seekToFraction(now+(e.key==='ArrowRight'?.02:-.02))}else if(e.key==='Home'){e.preventDefault();seekToFraction(0)}else if(e.key==='End'){e.preventDefault();seekToFraction(1)}});
 $('play').onclick=()=>{
  if(!pdf)return;
- if(paused){paused=false;speechSynthesis.resume();return}
+ if(paused){paused=false;active=true;speechSynthesis.resume();sentenceStartedAt=performance.now();$('status').textContent='Leitura retomada.';startProgressTimer();return}
  if(active)return;
- parts=makeParts();part=0;active=true;speakNext();
+ parts=makeParts();rebuildTimeline();startFrom(0);
 };
-$('pause').onclick=()=>{if(speechSynthesis.speaking){paused=true;speechSynthesis.pause();$('status').textContent='Leitura pausada.'}};
-function stopRead(){speechSynthesis.cancel();active=false;paused=false;$('bar').style.width='0%'}
+$('pause').onclick=()=>{if(speechSynthesis.speaking){paused=true;speechSynthesis.pause();elapsedBefore=Math.min(totalSeconds,elapsedBefore+(performance.now()-sentenceStartedAt)/1000);active=true;clearInterval(progressTimer);updateTimeline();$('status').textContent='Leitura pausada.'}};
+function stopRead(){speechSynthesis.cancel();active=false;paused=false;clearInterval(progressTimer);elapsedBefore=0;part=0;$('bar').style.width='0%';updateTimeline()}
 $('stop').onclick=()=>{stopRead();$('status').textContent='Narração parada.'};
 </script>
 </body></html>
