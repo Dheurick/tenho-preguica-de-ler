@@ -182,7 +182,7 @@ footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;paddin
   <label class="upload"><span class="plus">＋</span><span><b>Abrir arquivo PDF</b><br><span class="small">Escolha um documento do dispositivo</span></span><input id="file" type="file" accept="application/pdf"></label>
   <p class="small" id="filename">Nenhum documento aberto.</p>
   <div class="section-title">VOZ DA NARRAÇÃO</div><select id="voice"><option value="">Carregando vozes pt-BR…</option></select>
-  <p class="small">Somente vozes identificadas como Português (Brasil), fornecidas pelo aparelho.</p>
+  <p class="small" id="voiceInfo">Vozes disponíveis no dispositivo. As opções em Português aparecem primeiro.</p>
   <div class="section-title speedrow"><span>VELOCIDADE</span><strong id="speedLabel">1,0×</strong></div>
   <input id="speed" type="range" min=".6" max="2" value="1" step=".1">
   <div class="section-title">REPRODUÇÃO</div>
@@ -197,15 +197,72 @@ footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;paddin
 const $=id=>document.getElementById(id);
 let pdf=null,page=1,texts=[],parts=[],part=0,active=false,paused=false;
 let durations=[],totalSeconds=0,elapsedBefore=0,sentenceStartedAt=0,progressTimer=null;
-if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-function refreshVoices(){
- const s=$('voice'),old=s.value;s.innerHTML='';
- const vs=speechSynthesis.getVoices().filter(v=>v.lang.toLowerCase()==='pt-br');
- if(!vs.length){s.innerHTML='<option value="">Voz pt-BR não encontrada no aparelho</option>';return}
- vs.forEach(v=>{const o=document.createElement('option');o.value=v.name;o.textContent=v.name+' · Português (Brasil)';s.append(o)});
- if([...s.options].some(o=>o.value===old))s.value=old;
+let screenWakeLock=null,wakeLockWanted=false;
+async function keepScreenAwake(){
+ wakeLockWanted=true;
+ if(!('wakeLock' in navigator)){
+  $('status').textContent='Este navegador não oferece bloqueio de tela ligada. Ajuste o bloqueio automático do celular para “Nunca” durante a leitura.';
+  return false;
+ }
+ try{
+  if(!screenWakeLock)screenWakeLock=await navigator.wakeLock.request('screen');
+  screenWakeLock.addEventListener('release',()=>{screenWakeLock=null});
+  return true;
+ }catch(err){
+  screenWakeLock=null;
+  $('status').textContent='Não foi possível manter a tela ligada. Verifique se a economia de bateria está ativa.';
+  return false;
+ }
 }
-refreshVoices();speechSynthesis.onvoiceschanged=refreshVoices;
+async function allowScreenSleep(){
+ wakeLockWanted=false;
+ if(screenWakeLock){try{await screenWakeLock.release()}catch(e){}screenWakeLock=null}
+}
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible'&&wakeLockWanted&&!screenWakeLock)keepScreenAwake();
+});
+
+if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+let availableVoices=[];
+function langLabel(lang){
+ const normalized=(lang||'').replace('_','-').toLowerCase();
+ if(normalized==='pt-br')return 'Português (Brasil)';
+ if(normalized.startsWith('pt-'))return 'Português · '+lang;
+ if(normalized==='pt')return 'Português';
+ return lang||'Idioma não informado';
+}
+function refreshVoices(){
+ const s=$('voice'),old=s.value;
+ const current=speechSynthesis.getVoices();
+ if(!current.length){
+  $('voiceInfo').textContent='Aguardando as vozes disponibilizadas pelo navegador…';
+  return;
+ }
+ availableVoices=current.slice().sort((a,b)=>{
+  const rank=v=>{const l=(v.lang||'').replace('_','-').toLowerCase();return l==='pt-br'?0:l.startsWith('pt-')?1:l==='pt'?2:3};
+  return rank(a)-rank(b)||a.name.localeCompare(b.name);
+ });
+ s.innerHTML='';
+ availableVoices.forEach((v,i)=>{
+  const o=document.createElement('option');
+  o.value=v.voiceURI||v.name;
+  o.textContent=v.name+' · '+langLabel(v.lang);
+  o.dataset.voiceName=v.name;
+  s.append(o);
+ });
+ const same=[...s.options].find(o=>o.value===old||o.dataset.voiceName===old);
+ if(same)s.value=same.value;
+ else{
+  const preferred=availableVoices.find(v=>(v.lang||'').replace('_','-').toLowerCase()==='pt-br');
+  if(preferred)s.value=preferred.voiceURI||preferred.name;
+ }
+ $('voiceInfo').textContent=availableVoices.length+' voz(es) disponibilizada(s) pelo navegador. Vozes em português aparecem primeiro.';
+}
+refreshVoices();
+if('onvoiceschanged' in speechSynthesis)speechSynthesis.onvoiceschanged=refreshVoices;
+// Alguns navegadores móveis entregam a lista alguns instantes depois de abrir a página.
+let voicePolls=0;
+const voicePoll=setInterval(()=>{refreshVoices();if(speechSynthesis.getVoices().length||++voicePolls>20)clearInterval(voicePoll)},500);
 function fmt(sec){sec=Math.max(0,Math.floor(sec||0));return String(Math.floor(sec/60)).padStart(2,'0')+':'+String(sec%60).padStart(2,'0')}
 function estimateSeconds(text){
  // Estimativa inicial; a posição real avança ao terminar cada frase.
@@ -251,7 +308,7 @@ $('speed').oninput=()=>{$('speedLabel').textContent=Number($('speed').value).toF
 function makeParts(){const a=[];for(let n=page-1;n<texts.length;n++){(texts[n].replace(/\s+/g,' ').match(/[^.!?;:]+[.!?;:]*/g)||[]).forEach(t=>{if(t.trim())a.push({t:t.trim(),p:n+1})})}return a}
 function speakNext(){
  if(!active||paused)return;
- if(part>=parts.length){active=false;elapsedBefore=totalSeconds;clearInterval(progressTimer);$('status').textContent='Leitura concluída!';updateTimeline();return}
+ if(part>=parts.length){active=false;elapsedBefore=totalSeconds;clearInterval(progressTimer);allowScreenSleep();$('status').textContent='Leitura concluída!';updateTimeline();return}
  const item=parts[part];
  const continueSpeaking=async()=>{
   if(!active||paused)return;
@@ -259,8 +316,9 @@ function speakNext(){
   $('reading').textContent='Página '+item.p+' · '+item.t;
   elapsedBefore=secondsAt(part);sentenceStartedAt=performance.now();updateTimeline();startProgressTimer();
   const u=new SpeechSynthesisUtterance(item.t),voices=speechSynthesis.getVoices();
-  const chosen=voices.find(v=>v.name===$('voice').value&&v.lang.toLowerCase()==='pt-br')||voices.find(v=>v.lang.toLowerCase()==='pt-br');
-  u.lang='pt-BR';if(chosen)u.voice=chosen;u.rate=Number($('speed').value);
+  const selected=$('voice').selectedOptions[0];
+  const chosen=voices.find(v=>(v.voiceURI||v.name)===(selected?.value||''))||voices.find(v=>v.name===selected?.dataset.voiceName);
+  u.lang=chosen?.lang||'pt-BR';if(chosen)u.voice=chosen;u.rate=Number($('speed').value);
   u.onend=()=>{part++;elapsedBefore=secondsAt(part);updateTimeline();speakNext()};
   u.onerror=e=>{if(e.error!=='canceled'){$('status').textContent='Erro ao reproduzir a voz.';active=false;clearInterval(progressTimer)}};
   speechSynthesis.speak(u);
@@ -268,6 +326,7 @@ function speakNext(){
  continueSpeaking();
 }
 function startFrom(index){
+ keepScreenAwake();
  speechSynthesis.cancel();part=Math.max(0,Math.min(parts.length-1,index));elapsedBefore=secondsAt(part);active=true;paused=false;
  $('status').textContent='Reproduzindo leitura…';speakNext();
 }
@@ -282,12 +341,12 @@ $('progressTrack').addEventListener('click',pointerSeek);
 $('progressTrack').addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const now=totalSeconds?elapsedBefore/totalSeconds:0;seekToFraction(now+(e.key==='ArrowRight'?.02:-.02))}else if(e.key==='Home'){e.preventDefault();seekToFraction(0)}else if(e.key==='End'){e.preventDefault();seekToFraction(1)}});
 $('play').onclick=()=>{
  if(!pdf)return;
- if(paused){paused=false;active=true;speechSynthesis.resume();sentenceStartedAt=performance.now();$('status').textContent='Leitura retomada.';startProgressTimer();return}
+ if(paused){paused=false;active=true;keepScreenAwake();speechSynthesis.resume();sentenceStartedAt=performance.now();$('status').textContent='Leitura retomada.';startProgressTimer();return}
  if(active)return;
  parts=makeParts();rebuildTimeline();startFrom(0);
 };
-$('pause').onclick=()=>{if(speechSynthesis.speaking){paused=true;speechSynthesis.pause();elapsedBefore=Math.min(totalSeconds,elapsedBefore+(performance.now()-sentenceStartedAt)/1000);active=true;clearInterval(progressTimer);updateTimeline();$('status').textContent='Leitura pausada.'}};
-function stopRead(){speechSynthesis.cancel();active=false;paused=false;clearInterval(progressTimer);elapsedBefore=0;part=0;$('bar').style.width='0%';updateTimeline()}
+$('pause').onclick=()=>{if(speechSynthesis.speaking){paused=true;allowScreenSleep();speechSynthesis.pause();elapsedBefore=Math.min(totalSeconds,elapsedBefore+(performance.now()-sentenceStartedAt)/1000);active=true;clearInterval(progressTimer);updateTimeline();$('status').textContent='Leitura pausada.'}};
+function stopRead(){speechSynthesis.cancel();allowScreenSleep();active=false;paused=false;clearInterval(progressTimer);elapsedBefore=0;part=0;$('bar').style.width='0%';updateTimeline()}
 $('stop').onclick=()=>{stopRead();$('status').textContent='Narração parada.'};
 </script>
 </body></html>
