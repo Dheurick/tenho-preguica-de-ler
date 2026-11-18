@@ -83,6 +83,12 @@ main{
  radial-gradient(ellipse at 50% 0%,rgba(185,185,190,.10),transparent 62%),#09090a;
 }
 .page{display:block;max-width:100%;height:auto;box-shadow:0 16px 36px rgba(0,0,0,.55);animation:appear .25s ease}
+.pagewrap{position:relative;display:inline-block;max-width:100%;line-height:1;box-shadow:0 16px 36px rgba(0,0,0,.55);animation:appear .25s ease}
+.pagewrap canvas{display:block;max-width:100%;height:auto;box-shadow:none}
+.pagewrap .textLayer{position:absolute;inset:0;overflow:hidden;line-height:1;transform-origin:0 0;opacity:1;user-select:text}
+.pagewrap .textLayer span{color:transparent!important;cursor:text}
+.pagewrap .textLayer span.medusa-highlight{background:rgba(255,224,65,.62);box-shadow:0 0 0 1px rgba(255,224,65,.18);border-radius:2px;color:transparent!important}
+.pagewrap .textLayer ::selection{background:rgba(255,224,65,.45)}
 .empty{margin:auto;text-align:center;padding:48px 16px;color:var(--silver);max-width:520px}
 .book{font-size:57px;line-height:1;color:#FFFFFF;font-weight:300;text-shadow:0 0 24px rgba(255,255,255,.25)}
 .empty h2{font-size:clamp(21px,3vw,27px);color:#FFFFFF;margin:20px 0 8px;letter-spacing:-.6px}
@@ -124,6 +130,10 @@ input[type=range]{width:100%;accent-color:#FFFFFF;cursor:pointer}
 .btn.secondary{background:linear-gradient(120deg,#2E2E31,#202023);color:#FFFFFF;border-color:rgba(185,185,190,.28);box-shadow:none}
 .btn.secondary:hover{border-color:rgba(255,255,255,.6);background:#38383b}
 .btn.wide{grid-column:1/-1}
+.btn.is-playing{background:linear-gradient(120deg,#15803d,#22c55e);color:#fff;border-color:#4ade80;box-shadow:0 0 0 2px rgba(34,197,94,.18),0 4px 16px rgba(34,197,94,.18)}
+.btn.is-stopped{background:linear-gradient(120deg,#991b1b,#ef4444);color:#fff;border-color:#f87171;box-shadow:0 0 0 2px rgba(239,68,68,.16)}
+.btn.is-paused{background:linear-gradient(120deg,#a16207,#eab308);color:#111;border-color:#facc15}
+
 .hero-upload{min-width:205px;min-height:43px;font-size:12px}
 .status{min-height:30px;margin-top:12px;font-size:10px;color:var(--silver);line-height:1.45}
 footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;padding:0 12px 15px}
@@ -186,16 +196,17 @@ footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;paddin
   <div class="section-title speedrow"><span>VELOCIDADE</span><strong id="speedLabel">1,0×</strong></div>
   <input id="speed" type="range" min=".6" max="2" value="1" step=".1">
   <div class="section-title">REPRODUÇÃO</div>
-  <div class="controls"><button class="btn" id="play" disabled>▶ Ouvir</button><button class="btn secondary" id="pause" disabled>Ⅱ Pausar</button><button class="btn secondary wide" id="stop" disabled>■ Parar</button></div>
-  <div class="status" id="status">Abra um PDF para começar.</div>
+  <div class="controls"><button class="btn" id="play" disabled>▶ Play</button><button class="btn secondary" id="stop" disabled>■ Stop</button></div>
+  <div class="status" id="status">Abra um PDF para começar.</div><p class="small">🟨 O trecho narrado é destacado no PDF para acompanhar a leitura.</p>
  </aside>
 </main>
 <footer>MEDUSA · SUA BIBLIOTECA PARTICULAR</footer>
 </div>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf_viewer.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script>
 const $=id=>document.getElementById(id);
-let pdf=null,page=1,texts=[],parts=[],part=0,active=false,paused=false;
+let pdf=null,page=1,texts=[],pageLines=[],pageTextContents=[],parts=[],part=0,active=false,paused=false,titlePauseTimer=null;
 let durations=[],totalSeconds=0,elapsedBefore=0,sentenceStartedAt=0,progressTimer=null;
 let screenWakeLock=null,wakeLockWanted=false;
 async function keepScreenAwake(){
@@ -301,40 +312,119 @@ $('file').onchange=async e=>{
  if(!window.pdfjsLib){$('status').textContent='Não foi possível carregar o leitor de PDF. Verifique a conexão.';return}
  stopRead();$('status').textContent='Abrindo PDF…';
  try{
-  pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;texts=[];
-  for(let n=1;n<=pdf.numPages;n++){const p=await pdf.getPage(n),c=await p.getTextContent();texts.push(c.items.map(x=>x.str).join(' '))}
+  pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;texts=[];pageLines=[];pageTextContents=[];
+  for(let n=1;n<=pdf.numPages;n++){
+   const p=await pdf.getPage(n),c=await p.getTextContent();pageTextContents.push(c);
+   const lines=[];
+   for(const item of c.items){
+    if(!item.str||!item.str.trim())continue;
+    const y=Math.round(item.transform?.[5]||0);
+    const size=Math.abs(item.transform?.[3]||item.height||10);
+    let line=lines.findLast?.(x=>Math.abs(x.y-y)<=2);
+    if(!line) {line={y,text:'',size};lines.push(line)}
+    line.text+=(line.text?' ':'')+item.str.trim();line.size=Math.max(line.size,size);
+   }
+   lines.sort((a,b)=>b.y-a.y);
+   const sizes=lines.map(x=>x.size).sort((a,b)=>a-b);
+   const median=sizes.length?sizes[Math.floor(sizes.length/2)]:10;
+   const normalized=lines.map(x=>{
+    const t=x.text.replace(/\s+/g,' ').trim();
+    const upper=t.length>3&&t===t.toLocaleUpperCase('pt-BR')&&/[A-ZÁÉÍÓÚÂÊÔÃÕÇ]/.test(t);
+    const numbered=/^(?:CAP[IÍ]TULO|UNIDADE|M[ÓO]DULO|AULA|SE[CÇ][ÃA]O|TEMA|[0-9]+(?:\.[0-9]+)*\s*[-–.)])\b/i.test(t);
+    const large=x.size>=median*1.18;
+    return {t,title:t.length<=115&&(numbered||upper||(large&&t.length<=90))};
+   }).filter(x=>x.t);
+   pageLines.push(normalized);
+   texts.push(normalized.map(x=>x.t).join(' '));
+  }
   page=1;$('filename').textContent=f.name;$('docTitle').textContent=f.name;
-  $('play').disabled=$('pause').disabled=$('stop').disabled=false;
+  $('play').disabled=false;$('stop').disabled=false;
   $('prev').disabled=$('next').disabled=false;await renderPage();$('status').textContent='PDF carregado. Pronto para ouvir.';
  }catch(err){console.error(err);$('status').textContent='Não foi possível abrir este PDF.'}
 };
 async function renderPage(){
  const p=await pdf.getPage(page),scale=Math.min(1.5,($('pagearea').clientWidth-18)/p.getViewport({scale:1}).width);
  const v=p.getViewport({scale:Math.max(.5,scale)}),c=document.createElement('canvas');c.width=v.width;c.height=v.height;
- await p.render({canvasContext:c.getContext('2d'),viewport:v}).promise;c.className='page';
- $('pagearea').replaceChildren(c);$('pageLabel').textContent=page+' / '+pdf.numPages;
+ await p.render({canvasContext:c.getContext('2d'),viewport:v}).promise;
+ const wrap=document.createElement('div');wrap.className='pagewrap';wrap.style.width=v.width+'px';wrap.style.height=v.height+'px';
+ c.className='page';wrap.append(c);
+ const layer=document.createElement('div');layer.className='textLayer';layer.style.width=v.width+'px';layer.style.height=v.height+'px';wrap.append(layer);
+ $('pagearea').replaceChildren(wrap);$('pageLabel').textContent=page+' / '+pdf.numPages;
  $('prev').disabled=page===1;$('next').disabled=page===pdf.numPages;
+ try{
+  const content=pageTextContents[page-1]||await p.getTextContent();
+  const task=pdfjsLib.renderTextLayer({textContent:content,container:layer,viewport:v,textDivs:[]});
+  await task.promise;
+  highlightCurrentPart();
+ }catch(err){console.warn('Camada de texto do MEDUSA:',err)}
+}
+function highlightCurrentPart(){
+ const layer=$('pagearea').querySelector('.textLayer');if(!layer)return;
+ const spans=[...layer.querySelectorAll('span')];spans.forEach(x=>x.classList.remove('medusa-highlight'));
+ const item=parts[part];if(!item||item.p!==page||!spans.length)return;
+ const full=spans.map(x=>x.textContent||'').join(' ').toLocaleLowerCase('pt-BR');
+ const target=(item.t||'').toLocaleLowerCase('pt-BR').replace(/\\s+/g,' ').trim();
+ let start=full.indexOf(target),end=start>=0?start+target.length:-1;
+ if(start<0){
+  // Fallback tolerante a diferenças de espaços e pontuação entre PDF.js e o extrator.
+  const words=target.match(/[\\p{L}\\p{N}]+/gu)||[];
+  if(words.length){
+   const first=words[0];start=full.indexOf(first);
+   if(start>=0){end=start+first.length;for(let i=1;i<words.length;i++){const at=full.indexOf(words[i],end);if(at<0)break;end=at+words[i].length}}
+  }
+ }
+ if(start<0)return;
+ let offset=0;
+ spans.forEach(span=>{
+  const value=span.textContent||'',a=offset,b=a+value.length;
+  if(b>=start&&a<=end&&value.trim())span.classList.add('medusa-highlight');
+  offset=b+1;
+ });
 }
 $('prev').onclick=async()=>{page=Math.max(1,page-1);await renderPage()};
 $('next').onclick=async()=>{page=Math.min(pdf.numPages,page+1);await renderPage()};
 $('speed').oninput=()=>{$('speedLabel').textContent=Number($('speed').value).toFixed(1).replace('.',',')+'×';if(parts.length){rebuildTimeline();elapsedBefore=secondsAt(part);updateTimeline()}};
-function makeParts(){const a=[];for(let n=page-1;n<texts.length;n++){(texts[n].replace(/\s+/g,' ').match(/[^.!?;:]+[.!?;:]*/g)||[]).forEach(t=>{if(t.trim())a.push({t:t.trim(),p:n+1})})}return a}
-let medusaTts=null,medusaAudio=null,medusaAudioUrl=null,neuralLoading=null;
+function makeParts(){
+ const out=[];
+ for(let n=page-1;n<texts.length;n++){
+  const lines=pageLines[n]||[{t:texts[n],title:false}];
+  let buffer='';
+  const flush=()=>{if(buffer.trim())out.push({t:buffer.trim(),p:n+1,title:false});buffer=''};
+  for(const line of lines){
+   const t=line.t.trim();if(!t)continue;
+   if(line.title){
+    flush();
+    out.push({t,p:n+1,title:true});
+    continue;
+   }
+   const sentences=(t.match(/[^.!?]+[.!?]*|[^.!?]+$/g)||[t]).map(x=>x.trim()).filter(Boolean);
+   for(const sentence of sentences){
+    if(!buffer)buffer=sentence;
+    else if((buffer+' '+sentence).length<=190)buffer+=' '+sentence;
+    else{flush();buffer=sentence}
+   }
+  }
+  flush();
+ }
+ return out;
+}
+let medusaTts=null,medusaAudio=null,medusaAudioUrl=null,neuralLoading=null,neuralGenerating=false;
 async function loadNeuralVoice(){
  if(medusaTts)return medusaTts;
  if(neuralLoading)return neuralLoading;
  neuralLoading=(async()=>{
   $('neuralLoad').disabled=true;
   $('neuralLoad').textContent='Carregando voz neural…';
-  $('status').textContent='Preparando voz neural em português. Na primeira vez, será necessário baixar cerca de 30 MB.';
-  const mod=await import('https://cdn.jsdelivr.net/npm/@pedrobef/vozz@0.3.0/src/piper.js');
+  $('status').textContent='Preparando voz neural em português. Na primeira vez, será necessário baixar o modelo e o motor.';
+  const mod=await import('https://esm.sh/@pedrobef/vozz@0.3.0/piper');
   const Piper=mod.Piper;
+  if(!Piper)throw new Error('O módulo Piper não foi encontrado no pacote.');
   medusaTts=await Piper.carregar({
    dispositivo:'wasm',
    aoProgredir:(p)=>{
     if(p.status==='baixando'){
      const pct=Math.round((p.progresso||0)*100);
-     $('status').textContent='Baixando componentes da voz neural: '+pct+'%';
+     $('status').textContent='Baixando voz neural: '+pct+'%';
      $('neuralLoad').textContent='Baixando voz neural… '+pct+'%';
     }else if(p.status) $('status').textContent='Preparando voz neural: '+p.status;
    }
@@ -342,71 +432,96 @@ async function loadNeuralVoice(){
   $('neuralLoad').textContent='✓ Voz neural pronta';
   $('neuralLoad').disabled=false;
   $('voice').value='medusa-neural';
-  $('voiceInfo').textContent='Voz neural MEDUSA pronta · Português (Brasil). O modelo fica em cache no navegador.';
+  $('voiceInfo').textContent='Voz neural MEDUSA pronta · Português (Brasil).';
   return medusaTts;
  })().catch(err=>{
   console.error('MEDUSA neural TTS:',err);
   $('neuralLoad').disabled=false;
   $('neuralLoad').textContent='Tentar carregar voz neural novamente';
-  $('status').textContent='Não foi possível carregar a voz neural. Verifique a conexão e tente novamente.';
+  $('status').textContent='Falha ao carregar a voz neural: '+(err?.message||'verifique a conexão');
   neuralLoading=null;
   throw err;
  });
  return neuralLoading;
 }
 $('neuralLoad').onclick=async()=>{
- try{await loadNeuralVoice();$('status').textContent='Voz neural pronta. Selecione “MEDUSA Neural” e pressione Ouvir.'}
+ try{await loadNeuralVoice();$('status').textContent='Voz neural pronta. Pressione Play para começar.'}
  catch(e){}
 };
 function stopNeuralAudio(){
- if(medusaAudio){medusaAudio.pause();medusaAudio.onended=null;medusaAudio.onerror=null;medusaAudio=null}
+ if(medusaAudio){medusaAudio.pause();medusaAudio.onended=null;medusaAudio.onerror=null;medusaAudio.removeAttribute('src');medusaAudio.load();medusaAudio=null}
  if(medusaAudioUrl){URL.revokeObjectURL(medusaAudioUrl);medusaAudioUrl=null}
+ neuralGenerating=false;
+}
+function updatePlaybackButtons(){
+ const play=$('play'),stop=$('stop');
+ play.classList.toggle('is-playing',!!active&&!paused);
+ play.classList.toggle('is-paused',!!paused);
+ play.classList.remove('is-stopped');
+ play.textContent=paused?'▶ Play':(active?'Ⅱ Pause':'▶ Play');
+ stop.classList.toggle('is-stopped',!active&&!paused);
+ stop.classList.remove('is-playing','is-paused');
 }
 async function speakNeural(item){
  try{
+  neuralGenerating=true;
+  $('status').textContent='Gerando narração neural…';
   const tts=await loadNeuralVoice();
-  if(!active||paused)return;
-  const generated=await tts.falar(item.t,{velocidade:Number($('speed').value),maxFonemas:220});
+  if(!active||paused){neuralGenerating=false;return}
+  const neuralText=item.title?'Título: '+item.t:item.t;
+  const generated=await tts.falar(neuralText,{velocidade:Number($('speed').value),maxFonemas:220});
+  neuralGenerating=false;
   if(!active||paused)return;
   stopNeuralAudio();
-  const blob=generated.paraBlob();
-  medusaAudioUrl=URL.createObjectURL(blob);
-  medusaAudio=new Audio(medusaAudioUrl);
+  const url=generated.paraURL();
+  medusaAudioUrl=url;
+  medusaAudio=new Audio(url);
   medusaAudio.preload='auto';
   medusaAudio.onended=()=>{
    stopNeuralAudio();
    if(!active||paused)return;
-   part++;elapsedBefore=secondsAt(part);updateTimeline();speakNext();
+   const wasTitle=!!item.title;
+   part++;elapsedBefore=secondsAt(part);updateTimeline();highlightCurrentPart();
+   if(wasTitle){titlePauseTimer=setTimeout(()=>{titlePauseTimer=null;speakNext()},700)}
+   else speakNext();
   };
   medusaAudio.onerror=()=>{
    $('status').textContent='Falha ao reproduzir o áudio neural neste navegador.';
-   active=false;clearInterval(progressTimer);allowScreenSleep();
+   active=false;clearInterval(progressTimer);allowScreenSleep();updatePlaybackButtons();
   };
+  // The audio element is started from the Play gesture on the first chunk.
   await medusaAudio.play();
+  $('status').textContent='Narrando com a voz neural MEDUSA.';
  }catch(err){
-  console.error(err);
-  active=false;clearInterval(progressTimer);allowScreenSleep();
-  $('status').textContent='A voz neural não conseguiu iniciar. Tente novamente ou selecione uma voz nativa.';
+  neuralGenerating=false;
+  console.error('MEDUSA neural playback:',err);
+  active=false;clearInterval(progressTimer);allowScreenSleep();updatePlaybackButtons();
+  $('status').textContent='Erro na narração neural: '+(err?.message||'não foi possível reproduzir');
  }
 }
 function speakNext(){
  if(!active||paused)return;
- if(part>=parts.length){active=false;elapsedBefore=totalSeconds;clearInterval(progressTimer);stopNeuralAudio();allowScreenSleep();$('status').textContent='Leitura concluída!';updateTimeline();return}
+ if(part>=parts.length){active=false;paused=false;elapsedBefore=totalSeconds;clearInterval(progressTimer);stopNeuralAudio();allowScreenSleep();$('status').textContent='Leitura concluída!';updateTimeline();updatePlaybackButtons();return}
  const item=parts[part];
  const continueSpeaking=async()=>{
   if(!active||paused)return;
   if(page!==item.p){page=item.p;await renderPage()}
-  $('reading').textContent='Página '+item.p+' · '+item.t;
+  $('reading').textContent='Página '+item.p+' · '+(item.title?'TÍTULO: ':'')+item.t;highlightCurrentPart();
   elapsedBefore=secondsAt(part);sentenceStartedAt=performance.now();updateTimeline();startProgressTimer();
   if($('voice').value==='medusa-neural'){
    await speakNeural(item);
    return;
   }
-  const u=new SpeechSynthesisUtterance(item.t),voices=speechSynthesis.getVoices();
+  const u=new SpeechSynthesisUtterance((item.title?'Título: ':'')+item.t),voices=speechSynthesis.getVoices();
   const selected=$('voice').selectedOptions[0];
   const chosen=voices.find(v=>(v.voiceURI||v.name)===(selected?.value||''))||voices.find(v=>v.name===selected?.dataset.voiceName);
   u.lang=chosen?.lang||'pt-BR';if(chosen)u.voice=chosen;u.rate=Number($('speed').value);
-  u.onend=()=>{part++;elapsedBefore=secondsAt(part);updateTimeline();speakNext()};
+  u.onend=()=>{
+   const wasTitle=!!item.title;
+   part++;elapsedBefore=secondsAt(part);updateTimeline();highlightCurrentPart();
+   if(wasTitle){titlePauseTimer=setTimeout(()=>{titlePauseTimer=null;speakNext()},700)}
+   else speakNext();
+  };
   u.onerror=e=>{if(e.error!=='canceled'){$('status').textContent='Erro ao reproduzir a voz.';active=false;clearInterval(progressTimer)}};
   speechSynthesis.speak(u);
  };
@@ -415,7 +530,7 @@ function speakNext(){
 function startFrom(index){
  keepScreenAwake();
  speechSynthesis.cancel();stopNeuralAudio();part=Math.max(0,Math.min(parts.length-1,index));elapsedBefore=secondsAt(part);active=true;paused=false;
- $('status').textContent='Reproduzindo leitura…';speakNext();
+ $('status').textContent='Reproduzindo leitura…';updatePlaybackButtons();speakNext();
 }
 function seekToFraction(fraction){
  if(!parts.length)return;
@@ -426,14 +541,31 @@ function seekToFraction(fraction){
 function pointerSeek(e){const r=$('progressTrack').getBoundingClientRect();seekToFraction((e.clientX-r.left)/r.width)}
 $('progressTrack').addEventListener('click',pointerSeek);
 $('progressTrack').addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const now=totalSeconds?elapsedBefore/totalSeconds:0;seekToFraction(now+(e.key==='ArrowRight'?.02:-.02))}else if(e.key==='Home'){e.preventDefault();seekToFraction(0)}else if(e.key==='End'){e.preventDefault();seekToFraction(1)}});
-$('play').onclick=()=>{
+$('play').onclick=async()=>{
  if(!pdf)return;
- if(paused){paused=false;active=true;keepScreenAwake();if($('voice').value==='medusa-neural'&&medusaAudio){medusaAudio.play().catch(()=>{});}else speechSynthesis.resume();sentenceStartedAt=performance.now();$('status').textContent='Leitura retomada.';startProgressTimer();return}
- if(active)return;
+ if(paused){
+  paused=false;active=true;keepScreenAwake();
+  if($('voice').value==='medusa-neural'){
+   if(medusaAudio){medusaAudio.play().catch(err=>{$('status').textContent='Toque em Play novamente para liberar o áudio.';console.error(err)})}
+   else speakNext();
+  }else speechSynthesis.resume();
+  sentenceStartedAt=performance.now();$('status').textContent='Leitura retomada.';startProgressTimer();updatePlaybackButtons();return;
+ }
+ if(active){
+  paused=true;allowScreenSleep();clearInterval(progressTimer);
+  if($('voice').value==='medusa-neural'){if(medusaAudio)medusaAudio.pause()}
+  else speechSynthesis.pause();
+  elapsedBefore=Math.min(totalSeconds,elapsedBefore+(performance.now()-sentenceStartedAt)/1000);
+  updateTimeline();$('status').textContent='Leitura pausada.';updatePlaybackButtons();return;
+ }
  parts=makeParts();rebuildTimeline();startFrom(0);
 };
-$('pause').onclick=()=>{if(speechSynthesis.speaking||(medusaAudio&&!medusaAudio.paused)){paused=true;allowScreenSleep();if($('voice').value==='medusa-neural'&&medusaAudio)medusaAudio.pause();else speechSynthesis.pause();elapsedBefore=Math.min(totalSeconds,elapsedBefore+(performance.now()-sentenceStartedAt)/1000);active=true;clearInterval(progressTimer);updateTimeline();$('status').textContent='Leitura pausada.'}};
-function stopRead(){speechSynthesis.cancel();stopNeuralAudio();allowScreenSleep();active=false;paused=false;clearInterval(progressTimer);elapsedBefore=0;part=0;$('bar').style.width='0%';updateTimeline()}
+function stopRead(){
+ speechSynthesis.cancel();stopNeuralAudio();allowScreenSleep();active=false;paused=false;
+ if(titlePauseTimer){clearTimeout(titlePauseTimer);titlePauseTimer=null}
+ clearInterval(progressTimer);elapsedBefore=0;part=0;$('bar').style.width='0%';
+ updateTimeline();updatePlaybackButtons();
+}
 $('stop').onclick=()=>{stopRead();$('status').textContent='Narração parada.'};
 </script>
 </body></html>
