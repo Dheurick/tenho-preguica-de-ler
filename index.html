@@ -163,6 +163,34 @@ footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;paddin
  .hero-upload{min-width:190px}
 }
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
+
+/* Ajustes responsivos do painel Biblioteca */
+*,*::before,*::after{box-sizing:border-box}
+.panel{min-width:0;max-width:100%;overflow:hidden}
+.panel .upload,.panel .btn,.panel select,.panel input[type=range],.panel .status,.panel .small{max-width:100%;min-width:0}
+.panel .btn.wide{display:flex;width:100%;justify-content:center;align-items:center;white-space:normal;text-align:center;line-height:1.25}
+.panel #classicLoad,.panel #neuralLoad{margin-top:7px}
+.panel #voice{display:block;width:100%;margin-top:9px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.panel #voiceInfo{display:block;margin:9px 0 0;line-height:1.45;overflow-wrap:anywhere;word-break:normal}
+.panel .status{display:block;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;max-height:112px;overflow-y:auto;padding-right:3px}
+.panel .section-title{margin-top:16px;margin-bottom:8px}
+.panel .speedrow{margin-top:17px}
+.panel .controls{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.panel .controls .btn{width:100%;min-width:0}
+@media(max-width:850px){
+ main{width:100%;min-width:0}
+ .panel{width:100%;padding:15px 14px}
+ .panel h2{margin-bottom:13px}
+ .panel .section-title{margin-top:15px}
+ .panel .status{max-height:96px}
+}
+@media(max-width:390px){
+ .panel{padding:14px 12px}
+ .panel .btn{font-size:11px;padding:9px 10px}
+ .panel #voice{font-size:10px;padding:8px}
+ .panel .small{font-size:10px}
+}
+
 </style>
 </head>
 <body>
@@ -180,7 +208,7 @@ footer{text-align:center;color:#85858B;font-size:9px;letter-spacing:1.4px;paddin
   <div class="readerbar"><span id="docTitle">Sala de leitura</span><div class="pager"><button class="btn secondary" id="prev" disabled aria-label="Página anterior">‹</button><span id="pageLabel">1 / —</span><button class="btn secondary" id="next" disabled aria-label="Próxima página">›</button></div></div>
   <div class="pagearea" id="pagearea"><div class="empty"><div class="book">▤</div><h2>Sua próxima leitura começa aqui</h2><p>Abra um PDF e transforme sua leitura em áudio.</p><button class="btn hero-upload" id="openPdfHero" type="button">＋ &nbsp; Abrir arquivo PDF</button></div></div>
   <div class="audiofoot"><div class="reading" id="reading">O trecho narrado aparecerá aqui.</div><div class="progress" id="progressTrack" role="slider" tabindex="0" aria-label="Posição da leitura" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="bar" id="bar"></div></div>
-  <div class="time-row"><span id="elapsed">00:00</span><span id="remaining">-00:00</span><span id="totalTime">00:00</span></div></div>
+  <div class="time-row"><span id="elapsed">Aguardando áudio</span><span id="remaining"></span><span id="totalTime">0 trechos</span></div></div>
  </section>
  <aside class="panel">
   <h2>Biblioteca</h2>
@@ -299,13 +327,18 @@ function rebuildTimeline(){
 }
 function secondsAt(index){let s=0;for(let i=0;i<Math.min(index,durations.length);i++)s+=durations[i];return s}
 function updateTimeline(){
- const current=Math.min(totalSeconds,elapsedBefore+(active&&!paused?Math.min(durations[part]||0,(performance.now()-sentenceStartedAt)/1000):0));
- const pct=totalSeconds?current/totalSeconds*100:0;
- $('bar').style.width=pct+'%';$('elapsed').textContent=fmt(current);
- $('remaining').textContent='-'+fmt(Math.max(0,totalSeconds-current));$('totalTime').textContent=fmt(totalSeconds);
+ // A barra representa trechos efetivamente concluídos, não uma duração estimada.
+ // O trecho atual só entra no progresso quando o áudio termina.
+ const count=parts.length||0;
+ const completed=Math.max(0,Math.min(count,part));
+ const pct=count?completed/count*100:0;
+ $('bar').style.width=pct+'%';
+ $('elapsed').textContent=count?('Concluídos: '+completed):'Aguardando áudio';
+ $('remaining').textContent=active?(paused?'Pausado':'Em reprodução'):'';
+ $('totalTime').textContent=count?(count+' trechos'):'0 trechos';
  $('progressTrack').setAttribute('aria-valuenow',String(Math.round(pct)));
 }
-function startProgressTimer(){clearInterval(progressTimer);progressTimer=setInterval(updateTimeline,250)}
+function startProgressTimer(){clearInterval(progressTimer);updateTimeline()}
 $('openPdfHero').onclick=()=> $('file').click();
 $('file').onchange=async e=>{
  const f=e.target.files[0];if(!f)return;
@@ -474,6 +507,7 @@ async function loadClassicVoice(){
   $('classicLoad').disabled=false;
   $('classicLoad').textContent='Tentar carregar voz clássica novamente';
   $('status').textContent='Não foi possível carregar a voz clássica: '+(err?.message||'verifique a conexão');
+ $('status').style.overflowWrap='anywhere';
   classicLoading=null;
   throw err;
  });
@@ -651,13 +685,12 @@ function startFrom(index){
 }
 function seekToFraction(fraction){
  if(!parts.length)return;
- const target=Math.max(0,Math.min(.999999,fraction))*totalSeconds;
- let sum=0,index=0;while(index<durations.length-1&&sum+durations[index]<target){sum+=durations[index];index++}
+ const index=Math.max(0,Math.min(parts.length-1,Math.floor(Math.max(0,Math.min(.999999,fraction))*parts.length)));
  startFrom(index);
 }
 function pointerSeek(e){const r=$('progressTrack').getBoundingClientRect();seekToFraction((e.clientX-r.left)/r.width)}
 $('progressTrack').addEventListener('click',pointerSeek);
-$('progressTrack').addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const now=totalSeconds?elapsedBefore/totalSeconds:0;seekToFraction(now+(e.key==='ArrowRight'?.02:-.02))}else if(e.key==='Home'){e.preventDefault();seekToFraction(0)}else if(e.key==='End'){e.preventDefault();seekToFraction(1)}});
+$('progressTrack').addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const now=parts.length?part/parts.length:0;seekToFraction(now+(e.key==='ArrowRight'?.02:-.02))}else if(e.key==='Home'){e.preventDefault();seekToFraction(0)}else if(e.key==='End'){e.preventDefault();seekToFraction(1)}});
 $('play').onclick=async()=>{
  if(!pdf)return;
  if($('voice').value==='medusa-neural'&&!active&&!paused)unlockNeuralAudioFromGesture();
